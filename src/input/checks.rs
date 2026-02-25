@@ -9,9 +9,7 @@ pub fn can_analyze(input_lines: &[&str]) -> bool {
         if trimmed.is_empty() {
             continue;
         }
-
         let lower = trimmed.to_lowercase();
-
         let mut bracket_depth = 0;
         let mut paren_depth = 0;
 
@@ -32,11 +30,14 @@ pub fn can_analyze(input_lines: &[&str]) -> bool {
         if bracket_depth != 0 || paren_depth != 0 {
             return false;
         }
+
+        // Prevent backwards lookups from freezing
         if lower.starts_with('+')
             || lower.starts_with('-')
             || lower.starts_with('*')
             || lower.starts_with('/')
             || lower.starts_with(',')
+            || lower.starts_with(':')
             || lower.ends_with(',')
             || lower.ends_with('+')
             || lower.ends_with('-')
