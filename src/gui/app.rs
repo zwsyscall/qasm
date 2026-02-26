@@ -37,6 +37,41 @@ pub struct Config {
     pub hex: HexFormat,
 }
 
+// 1. Define the AppState struct
+pub struct AppState<'a> {
+    pub textareas: [TextArea<'a>; 2],
+    pub selected: usize,
+    pub last_time: Duration,
+    pub last_size: usize,
+    pub last_was_asm: bool,
+    pub last_was_success: bool,
+    pub config: Config,
+}
+
+impl<'a> AppState<'a> {
+    pub fn new(config: Config) -> Self {
+        Self {
+            textareas: [TextArea::default(), TextArea::default()],
+            selected: 0,
+            last_time: Duration::from_nanos(0),
+            last_size: 0,
+            last_was_asm: true,
+            last_was_success: true,
+            config,
+        }
+    }
+
+    /// Returns the index of the unfocused text area
+    pub fn unselected(&self) -> usize {
+        (self.selected + 1) % 2
+    }
+
+    /// Swaps the active text area
+    pub fn toggle_focus(&mut self) {
+        self.selected = self.unselected();
+    }
+}
+
 pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
     // Prelude
     let _cleanup = TerminalCleanup;
@@ -53,30 +88,34 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref());
 
-    // State
-    let mut textarea = [TextArea::default(), TextArea::default()];
-    let mut selected = 0;
-    let mut unselected = (selected + 1) % 2;
-    let mut last_time = Duration::from_nanos(0);
-    let mut last_size = 0;
-    let mut last_was_asm = true;
-    let mut last_was_success = true;
-    let mut config = Config {
+    // Initialize State
+    let config = Config {
         address: args.address,
         multiline: true,
         mode: args.mode,
         syntax: init_syntax,
         hex: args.format,
     };
+    let mut state = AppState::new(config);
 
-    mod_input(&mut textarea[selected], &config, last_was_asm);
-    mod_output(&mut textarea[unselected], "None", true, last_time, 0);
+    mod_input(
+        &mut state.textareas[state.selected],
+        &state.config,
+        state.last_was_asm,
+    );
+    mod_output(
+        &mut state.textareas[state.unselected()],
+        "None",
+        true,
+        state.last_time,
+        0,
+    );
 
     let (config_tx, config_rx) = unbounded();
     let (input_tx, input_rx) = unbounded();
     let (output_tx, output_rx) = unbounded();
 
-    let thread_config = config;
+    let thread_config = state.config;
     thread::spawn(move || {
         crate::worker::run(&thread_config, config_rx, input_rx, output_tx);
     });
@@ -91,33 +130,38 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     size,
                     duration,
                 } => {
-                    last_was_success = success;
-                    last_time = duration;
-                    last_size = size;
-                    last_was_asm = asm;
+                    state.last_was_success = success;
+                    state.last_time = duration;
+                    state.last_size = size;
+                    state.last_was_asm = asm;
 
                     let format = if asm {
-                        config.syntax.as_str()
+                        state.config.syntax.as_str()
                     } else {
-                        config.hex.as_str()
+                        state.config.hex.as_str()
                     };
 
                     // Update output
                     let mut new_ta = TextArea::new(lines);
-                    mod_output(&mut new_ta, format, success, last_time, size);
+                    mod_output(&mut new_ta, format, success, state.last_time, size);
 
                     // Fix position
-                    let (x, y) = textarea[unselected].cursor();
+                    let unselected_idx = state.unselected();
+                    let (x, y) = state.textareas[unselected_idx].cursor();
                     new_ta.move_cursor(CursorMove::Jump(
                         x.try_into().unwrap_or(u16::MAX),
                         y.try_into().unwrap_or(u16::MAX),
                     ));
 
                     // re-assign
-                    textarea[unselected] = new_ta;
+                    state.textareas[unselected_idx] = new_ta;
                 }
                 WorkerResult::Failure => {
-                    fail(&mut textarea[unselected], "Failed translating data");
+                    let unselected_idx = state.unselected();
+                    fail(
+                        &mut state.textareas[unselected_idx],
+                        "Failed translating data",
+                    );
                 }
             }
         }
@@ -126,8 +170,8 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
             let main_chunks = vertical_layout.split(f.area());
             let io_chunks = horizontal_layout.split(main_chunks[0]);
 
-            f.render_widget(&textarea[0], io_chunks[0]);
-            f.render_widget(&textarea[1], io_chunks[1]);
+            f.render_widget(&state.textareas[0], io_chunks[0]);
+            f.render_widget(&state.textareas[1], io_chunks[1]);
 
             let help_text = Paragraph::new(
                 " Esc/^q: Quit | ^↑/↓: ±0x100 Addr | ^←/→: Output Format | ^⇧←/→: Selected Area | ^t: Multiline | ^s: Syntax | ^x: Arch | ^c/y: Copy "
@@ -159,21 +203,22 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     shift: true,
                     ..
                 } => {
-                    let format = if !last_was_asm {
-                        config.syntax.as_str()
+                    let format = if !state.last_was_asm {
+                        state.config.syntax.as_str()
                     } else {
-                        config.hex.as_str()
+                        state.config.hex.as_str()
                     };
 
-                    selected = (selected + 1) % 2;
-                    unselected = (selected + 1) % 2;
+                    state.toggle_focus();
                     needs_update = true;
+
+                    let unselected_idx = state.unselected();
                     mod_output(
-                        &mut textarea[unselected],
+                        &mut state.textareas[unselected_idx],
                         format,
-                        last_was_success,
-                        last_time,
-                        last_size,
+                        state.last_was_success,
+                        state.last_time,
+                        state.last_size,
                     );
                 }
 
@@ -183,7 +228,7 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    config.address = config.address.saturating_add(0x100);
+                    state.config.address = state.config.address.saturating_add(0x100);
                     needs_update = true;
                     config_changed = true;
                 }
@@ -192,7 +237,7 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    config.address = config.address.saturating_sub(0x100);
+                    state.config.address = state.config.address.saturating_sub(0x100);
                     needs_update = true;
                     config_changed = true;
                 }
@@ -203,7 +248,7 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    config.hex = config.hex.next();
+                    state.config.hex = state.config.hex.next();
                     config_changed = true;
                     needs_update = true;
                 }
@@ -212,7 +257,7 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    config.hex = config.hex.last();
+                    state.config.hex = state.config.hex.last();
                     config_changed = true;
                     needs_update = true;
                 }
@@ -223,7 +268,7 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    let selected_area = &mut textarea[selected];
+                    let selected_area = &mut state.textareas[state.selected];
                     let text_to_copy = selected_area.lines().join("\n");
                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
                         if clipboard.set_text(text_to_copy).is_ok() {
@@ -240,7 +285,7 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    config.syntax = match config.syntax {
+                    state.config.syntax = match state.config.syntax {
                         output::AsmSyntax::Intel => output::AsmSyntax::Att,
                         output::AsmSyntax::Att => output::AsmSyntax::Intel,
                     };
@@ -254,7 +299,7 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    config.mode = if config.mode == 64 { 86 } else { 64 };
+                    state.config.mode = if state.config.mode == 64 { 86 } else { 64 };
                     needs_update = true;
                     config_changed = true;
                 }
@@ -265,7 +310,7 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    config.multiline = !config.multiline;
+                    state.config.multiline = !state.config.multiline;
                     needs_update = true;
                     config_changed = true;
                 }
@@ -277,13 +322,13 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     alt: true,
                     ..
                 } => {
-                    textarea[selected].insert_char(c);
+                    state.textareas[state.selected].insert_char(c);
                     needs_update = true;
                 }
 
                 // Only send input to the selected box
                 other_input => {
-                    if textarea[selected].input(other_input) {
+                    if state.textareas[state.selected].input(other_input) {
                         needs_update = true;
                     }
                 }
@@ -291,13 +336,19 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
 
             // Send the new config to the worker
             if config_changed {
-                let _ = config_tx.send(WorkerEvent::ConfigChange { config });
+                let _ = config_tx.send(WorkerEvent::ConfigChange {
+                    config: state.config,
+                });
             }
 
             // Update the input area, send the content to the worker
             if needs_update {
-                mod_input(&mut textarea[selected], &config, last_was_asm);
-                let source_lines: Vec<String> = textarea[selected]
+                mod_input(
+                    &mut state.textareas[state.selected],
+                    &state.config,
+                    state.last_was_asm,
+                );
+                let source_lines: Vec<String> = state.textareas[state.selected]
                     .lines()
                     .iter()
                     .map(|s| s.to_string())
