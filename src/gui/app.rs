@@ -38,6 +38,7 @@ pub struct Config {
 }
 
 pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
+    // Prelude
     let _cleanup = TerminalCleanup;
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
@@ -45,11 +46,6 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
     crossterm::execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut term = Terminal::new(backend)?;
-
-    let mut textarea = [TextArea::default(), TextArea::default()];
-    let mut selected = 0;
-    let mut unselected = (selected + 1) % 2;
-
     let vertical_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(3), Constraint::Length(1)].as_ref());
@@ -57,7 +53,10 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref());
 
-    // State stuff
+    // State
+    let mut textarea = [TextArea::default(), TextArea::default()];
+    let mut selected = 0;
+    let mut unselected = (selected + 1) % 2;
     let mut last_time = Duration::from_nanos(0);
     let mut last_size = 0;
     let mut last_was_asm = true;
@@ -131,7 +130,7 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
             f.render_widget(&textarea[1], io_chunks[1]);
 
             let help_text = Paragraph::new(
-                " Esc/^q: Quit | ^Up/Down: ±0x100 Addr | ^←/→ : Output format | ^←/→: Selected area | ^t: multiline | ^s: Syntax | ^x: Arch | ^c/y: Copy "
+                " Esc/^q: Quit | ^↑/↓: ±0x100 Addr | ^←/→: Output Format | ^⇧←/→: Selected Area | ^t: Multiline | ^s: Syntax | ^x: Arch | ^c/y: Copy "
             )
             .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD))
             .alignment(ratatui::layout::Alignment::Center);
@@ -168,11 +167,10 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
 
                     selected = (selected + 1) % 2;
                     unselected = (selected + 1) % 2;
-
-                    mod_input(&mut textarea[selected], &config, last_was_asm);
+                    needs_update = true;
                     mod_output(
                         &mut textarea[unselected],
-                        &format,
+                        format,
                         last_was_success,
                         last_time,
                         last_size,
@@ -225,13 +223,13 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    let mut selected_area = &mut textarea[selected];
+                    let selected_area = &mut textarea[selected];
                     let text_to_copy = selected_area.lines().join("\n");
                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
                         if clipboard.set_text(text_to_copy).is_ok() {
-                            copied(&mut selected_area);
+                            copied(selected_area);
                         } else {
-                            fail(&mut selected_area, "Failed copying data");
+                            fail(selected_area, "Failed copying data");
                         }
                     }
                 }
@@ -298,17 +296,6 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
 
             // Update the input area, send the content to the worker
             if needs_update {
-                mod_output(
-                    &mut textarea[unselected],
-                    if last_was_asm {
-                        config.syntax.as_str()
-                    } else {
-                        config.hex.as_str()
-                    },
-                    last_was_success,
-                    last_time,
-                    last_size,
-                );
                 mod_input(&mut textarea[selected], &config, last_was_asm);
                 let source_lines: Vec<String> = textarea[selected]
                     .lines()
