@@ -1,7 +1,7 @@
 use crate::input;
+use crate::input::assembler::assemble_text;
 use crate::input::checks::InputType;
 use crate::input::disassmbler::disassemble_text;
-use crate::input::{assembler::assemble_text, checks::can_analyze};
 use crate::output::{self, AsmSyntax, HexFormat, format_bytes};
 use capstone::Capstone;
 use capstone::arch::x86::ArchMode;
@@ -238,9 +238,6 @@ pub fn run(
                     }
                 }
                 InputType::Assembly => {
-                    if !can_analyze(&input_lines) {
-                        continue;
-                    }
                     if let Some(mapped_bytes) = assemble_text(&ks, &cs, input_lines, config.address)
                     {
                         config.assembling = true;
