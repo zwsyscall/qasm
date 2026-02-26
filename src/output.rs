@@ -1,13 +1,13 @@
 use clap::ValueEnum;
 use std::fmt;
 
-#[derive(ValueEnum, Clone, Copy, Debug, PartialEq)]
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AsmSyntax {
     Intel,
     Att,
 }
 
-#[derive(ValueEnum, Clone, Copy, Debug, PartialEq)]
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HexFormat {
     Pretty,
     RawHex,
