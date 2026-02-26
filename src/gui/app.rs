@@ -1,3 +1,4 @@
+use crate::Cli;
 use crate::output::{self, AsmSyntax, HexFormat};
 use ratatui::Terminal;
 use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
@@ -8,26 +9,36 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::prelude::CrosstermBackend;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::Paragraph;
-use ratatui_textarea::{Input, Key, TextArea};
+use ratatui_textarea::{CursorMove, Input, Key, TextArea};
 
 use super::helpers::*;
 use crate::worker::message::{WorkerCommand, WorkerEvent, WorkerResult};
 use crossbeam_channel::unbounded;
-use std::io;
 use std::thread;
 use std::time::Duration;
+use std::{io, u16};
+
+// Useful for panics
+struct TerminalCleanup;
+
+impl Drop for TerminalCleanup {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Config {
     pub address: u64,
-    pub assembling: bool,
     pub multiline: bool,
     pub mode: u8,
     pub syntax: AsmSyntax,
     pub hex: HexFormat,
 }
 
-pub fn run(init_mode: u8, init_syntax: output::AsmSyntax) -> io::Result<()> {
+pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
+    let _cleanup = TerminalCleanup;
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     enable_raw_mode()?;
@@ -35,8 +46,10 @@ pub fn run(init_mode: u8, init_syntax: output::AsmSyntax) -> io::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut term = Terminal::new(backend)?;
 
-    let mut input_area = TextArea::default();
-    let mut output_area = TextArea::default();
+    let mut textarea = [TextArea::default(), TextArea::default()];
+    let mut selected = 0;
+    let mut unselected = (selected + 1) % 2;
+
     let vertical_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(3), Constraint::Length(1)].as_ref());
@@ -45,19 +58,20 @@ pub fn run(init_mode: u8, init_syntax: output::AsmSyntax) -> io::Result<()> {
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref());
 
     // State stuff
-    let mut input_focused = true;
-    let mut time_taken = Duration::from_nanos(0);
+    let mut last_time = Duration::from_nanos(0);
+    let mut last_size = 0;
+    let mut last_was_asm = true;
+    let mut last_was_success = true;
     let mut config = Config {
-        address: 0,
-        assembling: true,
+        address: args.address,
         multiline: true,
-        mode: init_mode,
+        mode: args.mode,
         syntax: init_syntax,
-        hex: HexFormat::Pretty,
+        hex: args.format,
     };
 
-    mod_input(&mut input_area, &config);
-    mod_output(&mut output_area, "None", true, time_taken, 0);
+    mod_input(&mut textarea[selected], &config, last_was_asm);
+    mod_output(&mut textarea[unselected], "None", true, last_time, 0);
 
     let (config_tx, config_rx) = unbounded();
     let (input_tx, input_rx) = unbounded();
@@ -78,31 +92,33 @@ pub fn run(init_mode: u8, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     size,
                     duration,
                 } => {
-                    time_taken = duration;
-                    config.assembling = asm;
+                    last_was_success = success;
+                    last_time = duration;
+                    last_size = size;
+                    last_was_asm = asm;
+
                     let format = if asm {
                         config.syntax.as_str()
                     } else {
                         config.hex.as_str()
                     };
 
-                    // PRO TIP: When re-rendering output on live changes, grab the old cursor
-                    // position first so the user's scroll doesn't reset while they navigate!
-                    let cursor_pos = output_area.cursor();
-
+                    // Update output
                     let mut new_ta = TextArea::new(lines);
-                    mod_output(&mut new_ta, format, success, time_taken, size);
+                    mod_output(&mut new_ta, format, success, last_time, size);
 
-                    // Restore the cursor position (Requires ratatui-textarea >= 0.4.0)
-                    new_ta.move_cursor(ratatui_textarea::CursorMove::Jump(
-                        cursor_pos.0 as u16,
-                        cursor_pos.1 as u16,
+                    // Fix position
+                    let (x, y) = textarea[unselected].cursor();
+                    new_ta.move_cursor(CursorMove::Jump(
+                        x.try_into().unwrap_or(u16::MAX),
+                        y.try_into().unwrap_or(u16::MAX),
                     ));
 
-                    output_area = new_ta;
+                    // re-assign
+                    textarea[unselected] = new_ta;
                 }
                 WorkerResult::Failure => {
-                    mod_output(&mut output_area, "None", false, time_taken, 0);
+                    fail(&mut textarea[unselected], "Failed translating data");
                 }
             }
         }
@@ -111,8 +127,8 @@ pub fn run(init_mode: u8, init_syntax: output::AsmSyntax) -> io::Result<()> {
             let main_chunks = vertical_layout.split(f.area());
             let io_chunks = horizontal_layout.split(main_chunks[0]);
 
-            f.render_widget(&input_area, io_chunks[0]);
-            f.render_widget(&output_area, io_chunks[1]);
+            f.render_widget(&textarea[0], io_chunks[0]);
+            f.render_widget(&textarea[1], io_chunks[1]);
 
             let help_text = Paragraph::new(
                 " Esc/^q: Quit | ^Up/Down: ±0x100 Addr | ^←/→ : Output format | ^←/→: Selected area | ^t: multiline | ^s: Syntax | ^x: Arch | ^c/y: Copy "
@@ -138,21 +154,29 @@ pub fn run(init_mode: u8, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     break;
                 }
 
-                // 2. TOGGLE FOCUS WITH CTRL + TAB
                 Input {
                     key: Key::Right | Key::Left,
                     ctrl: true,
                     shift: true,
                     ..
                 } => {
-                    input_focused = !input_focused;
-                    if input_focused {
-                        activate_area(&mut input_area);
-                        deactivate_area(&mut output_area);
+                    let format = if !last_was_asm {
+                        config.syntax.as_str()
                     } else {
-                        activate_area(&mut output_area);
-                        deactivate_area(&mut input_area);
-                    }
+                        config.hex.as_str()
+                    };
+
+                    selected = (selected + 1) % 2;
+                    unselected = (selected + 1) % 2;
+
+                    mod_input(&mut textarea[selected], &config, last_was_asm);
+                    mod_output(
+                        &mut textarea[unselected],
+                        &format,
+                        last_was_success,
+                        last_time,
+                        last_size,
+                    );
                 }
 
                 // Address
@@ -201,12 +225,13 @@ pub fn run(init_mode: u8, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    let text_to_copy = output_area.lines().join("\n");
+                    let mut selected_area = &mut textarea[selected];
+                    let text_to_copy = selected_area.lines().join("\n");
                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
                         if clipboard.set_text(text_to_copy).is_ok() {
-                            copied(&mut output_area);
+                            copied(&mut selected_area);
                         } else {
-                            fail(&mut output_area, "Failed copying data");
+                            fail(&mut selected_area, "Failed copying data");
                         }
                     }
                 }
@@ -254,31 +279,14 @@ pub fn run(init_mode: u8, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     alt: true,
                     ..
                 } => {
-                    input_area.insert_char(c);
+                    textarea[selected].insert_char(c);
                     needs_update = true;
                 }
 
                 // Only send input to the selected box
                 other_input => {
-                    if input_focused {
-                        if input_area.input(other_input) {
-                            needs_update = true;
-                        }
-                    } else {
-                        // When output is focused, allow navigation but ignore text insertion
-                        match other_input.key {
-                            Key::Up
-                            | Key::Down
-                            | Key::Left
-                            | Key::Right
-                            | Key::PageUp
-                            | Key::PageDown
-                            | Key::Home
-                            | Key::End => {
-                                output_area.input(other_input);
-                            }
-                            _ => {}
-                        }
+                    if textarea[selected].input(other_input) {
+                        needs_update = true;
                     }
                 }
             }
@@ -290,11 +298,27 @@ pub fn run(init_mode: u8, init_syntax: output::AsmSyntax) -> io::Result<()> {
 
             // Update the input area, send the content to the worker
             if needs_update {
-                mod_input(&mut input_area, &config);
-                let input_lines: Vec<String> =
-                    input_area.lines().iter().map(|s| s.to_string()).collect();
+                mod_output(
+                    &mut textarea[unselected],
+                    if last_was_asm {
+                        config.syntax.as_str()
+                    } else {
+                        config.hex.as_str()
+                    },
+                    last_was_success,
+                    last_time,
+                    last_size,
+                );
+                mod_input(&mut textarea[selected], &config, last_was_asm);
+                let source_lines: Vec<String> = textarea[selected]
+                    .lines()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
 
-                let _ = input_tx.send(WorkerCommand { input: input_lines });
+                let _ = input_tx.send(WorkerCommand {
+                    input: source_lines,
+                });
             }
         }
     }

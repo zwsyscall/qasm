@@ -18,7 +18,7 @@ pub struct Cli {
     pub syntax: AsmSyntax,
 
     /// Output formatting to use
-    #[arg(short, long, value_enum, default_value_t = HexFormat::Pretty)]
+    #[arg(short, long, value_enum, default_value_t = HexFormat::RawHex)]
     pub format: HexFormat,
 
     /// Address to use for disassembly
@@ -53,7 +53,7 @@ fn main() -> io::Result<()> {
         println!("{}", output_text);
     } else {
         // TUI
-        gui::run(cli.mode, gui_syntax)?;
+        gui::run(cli, gui_syntax)?;
     }
     Ok(())
 }
