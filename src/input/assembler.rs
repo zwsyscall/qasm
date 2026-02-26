@@ -1,12 +1,13 @@
 use capstone::Capstone;
 use keystone_engine::Keystone;
+use std::ffi::CString;
 
 pub fn assemble_text(
     ks: &Keystone,
     cs: &Capstone,
     input: Vec<&str>,
     address: u64,
-) -> Option<Vec<Vec<u8>>> {
+) -> Option<(Vec<Vec<u8>>, usize)> {
     let mut expected_counts = Vec::new();
     for &line in &input {
         let trimmed = line.trim();
@@ -18,10 +19,11 @@ pub fn assemble_text(
             expected_counts.push(count);
         }
     }
-    let full_text = input.join("\n");
-    let asm_result = ks.asm(full_text, address).ok()?;
+    let full_text = CString::new(input.join("\n")).ok()?;
+    let asm_result = ks.asm(full_text.as_c_str(), address).ok()?;
 
-    let flat_bytes = asm_result.bytes;
+    let flat_bytes = asm_result.as_bytes();
+    let size = flat_bytes.len();
 
     let decoded_instructions = cs.disasm_all(&flat_bytes, address).ok()?;
     let mut decoded_iter = decoded_instructions.iter();
@@ -37,5 +39,5 @@ pub fn assemble_text(
         mapped_lines.push(line_bytes);
     }
 
-    Some(mapped_lines)
+    Some((mapped_lines, size))
 }

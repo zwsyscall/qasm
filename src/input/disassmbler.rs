@@ -5,10 +5,11 @@ pub fn disassemble_text(
     input: Vec<&str>,
     address: u64,
     multiline: bool,
-) -> Option<Vec<String>> {
+) -> Option<(Vec<String>, usize)> {
     let mut result = Vec::new();
     let mut single_line_statements = Vec::new();
     let mut current_addr = address;
+    let mut size = 0;
 
     for line in input {
         let trimmed = line.trim();
@@ -41,23 +42,22 @@ pub fn disassemble_text(
                 }
 
                 current_addr += bytes.len() as u64;
+                size += bytes.len();
             } else {
-                // Capstone failure
                 return None;
             }
         } else {
-            // Invalid hex
             return None;
         }
     }
 
     if !multiline {
         if single_line_statements.is_empty() {
-            return Some(vec![String::new()]);
+            return Some((vec![String::new()], size));
         } else {
-            return Some(vec![single_line_statements.join("; ")]);
+            return Some((vec![single_line_statements.join("; ")], size));
         }
     }
 
-    Some(result)
+    Some((result, size))
 }
