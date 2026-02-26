@@ -13,9 +13,12 @@ strip = true
 arboard = "3.6.1"
 capstone = "0.14.0"
 clap = { version = "4.5.60", features = ["derive"] }
+crossbeam-channel = "0.5.15"
 crossterm = "0.29.0"
 hex = "0.4.3"
-keystone-engine = { version = "0.1.0", features = ["build-from-src"] }
+keystone-engine = { version = "0.2.0", features = [
+    "build-from-src",
+], git = "https://github.com/zwsyscall/keystone-bindings.git" }
 ratatui = "0.30.0"
 ratatui-textarea = "0.8.0"
 tui-textarea = "0.7.0"
