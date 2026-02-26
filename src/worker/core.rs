@@ -12,7 +12,7 @@ use capstone::arch::BuildsCapstone;
 use crossbeam_channel::{Receiver, Sender, select};
 use keystone_engine::{Keystone, OptionValue};
 
-fn modify_assmblers(cs: &mut Capstone, ks: &mut Keystone, config: &Config) {
+fn reconfigure_engines(cs: &mut Capstone, ks: &mut Keystone, config: &Config) {
     let (ks_mode, cs_mode) = match config.mode {
         32 | 86 => (
             keystone_engine::Mode::MODE_32,
@@ -80,7 +80,7 @@ pub fn run(
     .expect("Failed to build initial Keystone");
 
     // Sync capstone & KS before we start
-    modify_assmblers(&mut cs, &mut ks, &cfg);
+    reconfigure_engines(&mut cs, &mut ks, &cfg);
 
     loop {
         let mut new_config = None;
@@ -112,7 +112,7 @@ pub fn run(
         // And this updates to it
         if let Some(config) = new_config {
             if config != cfg {
-                modify_assmblers(&mut cs, &mut ks, &config);
+                reconfigure_engines(&mut cs, &mut ks, &config);
                 cfg = config;
             }
         }
@@ -122,7 +122,7 @@ pub fn run(
             latest_cmd = Some(cmd);
         }
 
-        // And assmbles it
+        // And assembles it
         if let Some(cmd) = latest_cmd {
             let now = Instant::now();
             let msg: Vec<&str> = cmd.input.iter().map(|s| s.as_str()).collect();
@@ -130,7 +130,7 @@ pub fn run(
             let reply = match input::identify_type(&msg) {
                 InputType::Hex => {
                     if let Some((output_lines, size)) =
-                        disassemble_text(&cs, msg, cfg.address, cfg.multiline)
+                        disassemble_text(&cs, &msg, cfg.address, cfg.multiline)
                     {
                         let success = !output_lines.iter().all(|line| line.is_empty());
                         WorkerResult::Success {
@@ -145,7 +145,7 @@ pub fn run(
                     }
                 }
                 InputType::Assembly => {
-                    if let Some((mapped_bytes, size)) = assemble_text(&ks, &cs, msg, cfg.address) {
+                    if let Some((mapped_bytes, size)) = assemble_text(&ks, &cs, &msg, cfg.address) {
                         let output_lines: Vec<String> = if cfg.multiline {
                             mapped_bytes
                                 .into_iter()

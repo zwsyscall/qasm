@@ -48,7 +48,7 @@ pub fn analyze(cli: Cli, mut text_vec: String) -> String {
     match input::identify_type(&[text_vec.as_str()]) {
         InputType::Hex => {
             if let Some((output_lines, _size)) =
-                disassemble_text(&cs, vec![text_vec.as_str()], 0x0, true)
+                disassemble_text(&cs, &[text_vec.as_str()], 0x0, true)
             {
                 return output_lines.join("\n");
             } else {
@@ -56,8 +56,7 @@ pub fn analyze(cli: Cli, mut text_vec: String) -> String {
             }
         }
         InputType::Assembly => {
-            if let Some((mapped_bytes, _size)) =
-                assemble_text(&ks, &cs, vec![text_vec.as_str()], 0x0)
+            if let Some((mapped_bytes, _size)) = assemble_text(&ks, &cs, &[text_vec.as_str()], 0x0)
             {
                 let output_lines: Vec<String> = mapped_bytes
                     .into_iter()

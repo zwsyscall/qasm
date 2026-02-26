@@ -86,43 +86,28 @@ impl HexFormat {
     }
 }
 
+fn join_hex_bytes(bytes: &[u8], prefix: &str, sep: &str) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{prefix}{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(sep)
+}
+
 pub fn format_bytes(b: &[u8], format: &HexFormat) -> String {
     match format {
-        HexFormat::Pretty => {
-            let byte_strings = b
-                .iter()
-                .map(|byte| format!("0x{:02X}", byte))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{}", byte_strings)
-        }
-
+        HexFormat::Pretty => join_hex_bytes(b, "0x", ", "),
         HexFormat::RawHex => hex::encode(b),
-
         HexFormat::RustVector => {
-            let byte_strings = b
-                .iter()
-                .map(|byte| format!("0x{:02X}", byte))
-                .collect::<Vec<_>>()
-                .join(", ");
+            let byte_strings = join_hex_bytes(b, "0x", ", ");
             format!("let data: [u8; {}] = [{}];", b.len(), byte_strings)
         }
-
         HexFormat::CStyleArray => {
-            let byte_strings = b
-                .iter()
-                .map(|byte| format!("0x{:02X}", byte))
-                .collect::<Vec<_>>()
-                .join(", ");
+            let byte_strings = join_hex_bytes(b, "0x", ", ");
             format!("unsigned char data[{}] = {{ {} }};", b.len(), byte_strings)
         }
-
         HexFormat::StringLiteral => {
-            let byte_strings = b
-                .iter()
-                .map(|byte| format!("\\x{:02X}", byte))
-                .collect::<Vec<_>>()
-                .join("");
+            let byte_strings = join_hex_bytes(b, "0x", ", ");
             format!("\"{}\"", byte_strings)
         }
     }

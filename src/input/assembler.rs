@@ -5,11 +5,11 @@ use std::ffi::CString;
 pub fn assemble_text(
     ks: &Keystone,
     cs: &Capstone,
-    input: Vec<&str>,
+    input: &[&str],
     address: u64,
 ) -> Option<(Vec<Vec<u8>>, usize)> {
     let mut expected_counts = Vec::new();
-    for &line in &input {
+    for &line in input {
         let trimmed = line.trim();
 
         if trimmed.is_empty() || trimmed.ends_with(':') {
@@ -25,7 +25,7 @@ pub fn assemble_text(
     let flat_bytes = asm_result.as_bytes();
     let size = flat_bytes.len();
 
-    let decoded_instructions = cs.disasm_all(&flat_bytes, address).ok()?;
+    let decoded_instructions = cs.disasm_all(flat_bytes, address).ok()?;
     let mut decoded_iter = decoded_instructions.iter();
     let mut mapped_lines = Vec::new();
     for expected_count in expected_counts {

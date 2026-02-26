@@ -2,7 +2,7 @@ use capstone::Capstone;
 
 pub fn disassemble_text(
     cs: &Capstone,
-    input: Vec<&str>,
+    input: &[&str],
     address: u64,
     multiline: bool,
 ) -> Option<(Vec<String>, usize)> {
@@ -20,8 +20,7 @@ pub fn disassemble_text(
             continue;
         }
 
-        let clean_hex = trimmed.replace("0x", "").replace(" ", "").replace(",", "");
-
+        let clean_hex = crate::input::normalize_hex_input(trimmed);
         if let Ok(bytes) = hex::decode(&clean_hex) {
             if let Ok(instructions) = cs.disasm_all(&bytes, current_addr) {
                 for insn in instructions.iter() {
