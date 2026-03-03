@@ -18,7 +18,6 @@ use std::thread;
 use std::time::Duration;
 use std::{io, u16};
 
-// Useful for panics
 struct TerminalCleanup;
 
 impl Drop for TerminalCleanup {
@@ -37,7 +36,6 @@ pub struct Config {
     pub hex: HexFormat,
 }
 
-// 1. Define the AppState struct
 pub struct AppState<'a> {
     pub textareas: [TextArea<'a>; 2],
     pub selected: usize,
@@ -61,12 +59,12 @@ impl<'a> AppState<'a> {
         }
     }
 
-    /// Returns the index of the unfocused text area
+    // Returns the index of the unfocused text area
     pub fn unselected(&self) -> usize {
         (self.selected + 1) % 2
     }
 
-    /// Swaps the active text area
+    // Swaps the active text area
     pub fn toggle_focus(&mut self) {
         self.selected = self.unselected();
     }
@@ -74,6 +72,8 @@ impl<'a> AppState<'a> {
 
 pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
     // Prelude
+    // this _cleanup is kept so if we ever panic,
+    // the drop handler for this is called and the terminal is left in a usable state
     let _cleanup = TerminalCleanup;
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
@@ -105,7 +105,8 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
     );
     mod_output(
         &mut state.textareas[state.unselected()],
-        "None",
+        &state.config,
+        state.last_was_asm,
         true,
         state.last_time,
         0,
@@ -135,15 +136,16 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     state.last_size = size;
                     state.last_was_asm = asm;
 
-                    let format = if asm {
-                        state.config.syntax.as_str()
-                    } else {
-                        state.config.hex.as_str()
-                    };
-
                     // Update output
                     let mut new_ta = TextArea::new(lines);
-                    mod_output(&mut new_ta, format, success, state.last_time, size);
+                    mod_output(
+                        &mut new_ta,
+                        &state.config,
+                        state.last_was_asm,
+                        success,
+                        state.last_time,
+                        size,
+                    );
 
                     // Fix position
                     let unselected_idx = state.unselected();
@@ -158,10 +160,7 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                 }
                 WorkerResult::Failure => {
                     let unselected_idx = state.unselected();
-                    fail(
-                        &mut state.textareas[unselected_idx],
-                        "Failed translating data",
-                    );
+                    fail(&mut state.textareas[unselected_idx], "Decoder failure");
                 }
             }
         }
@@ -182,6 +181,7 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
             f.render_widget(help_text, main_chunks[1]);
         })?;
 
+        // 60 fps
         if ratatui::crossterm::event::poll(Duration::from_millis(16))? {
             let mut needs_update = false;
             let mut config_changed = false;
@@ -203,19 +203,14 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     shift: true,
                     ..
                 } => {
-                    let format = if !state.last_was_asm {
-                        state.config.syntax.as_str()
-                    } else {
-                        state.config.hex.as_str()
-                    };
-
                     state.toggle_focus();
+                    state.last_was_asm = !state.last_was_asm;
                     needs_update = true;
 
-                    let unselected_idx = state.unselected();
                     mod_output(
-                        &mut state.textareas[unselected_idx],
-                        format,
+                        &mut state.textareas[state.unselected()],
+                        &state.config,
+                        state.last_was_asm,
                         state.last_was_success,
                         state.last_time,
                         state.last_size,
@@ -248,7 +243,11 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    state.config.hex = state.config.hex.next();
+                    if state.last_was_asm {
+                        state.config.syntax = state.config.syntax.next();
+                    } else {
+                        state.config.hex = state.config.hex.next();
+                    }
                     config_changed = true;
                     needs_update = true;
                 }
@@ -257,7 +256,11 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    state.config.hex = state.config.hex.last();
+                    if state.last_was_asm {
+                        state.config.syntax = state.config.syntax.next();
+                    } else {
+                        state.config.hex = state.config.hex.next();
+                    }
                     config_changed = true;
                     needs_update = true;
                 }
@@ -285,10 +288,7 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                     ctrl: true,
                     ..
                 } => {
-                    state.config.syntax = match state.config.syntax {
-                        output::AsmSyntax::Intel => output::AsmSyntax::Att,
-                        output::AsmSyntax::Att => output::AsmSyntax::Intel,
-                    };
+                    state.config.syntax = state.config.syntax.next();
                     needs_update = true;
                     config_changed = true;
                 }
@@ -328,8 +328,24 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
 
                 // Only send input to the selected box
                 other_input => {
+                    // This is kind of a stupid hack, but to restore the colourscheme on keypresses
+                    // where only the cursor is moved, we do this.
+                    // First, save the cursor
+                    let c_before = state.textareas[state.selected].cursor();
+
                     if state.textareas[state.selected].input(other_input) {
                         needs_update = true;
+                    } else {
+                        // Now if the input() -> bool returned false, we didn't change the content
+                        // Compare the cursor position before the move to the position now
+                        if c_before != state.textareas[state.selected].cursor() {
+                            // if it's changed, refresh the input box
+                            mod_input(
+                                &mut state.textareas[state.selected],
+                                &state.config,
+                                state.last_was_asm,
+                            );
+                        }
                     }
                 }
             }
