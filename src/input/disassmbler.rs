@@ -4,19 +4,14 @@ pub fn disassemble_text(
     cs: &Capstone,
     input: &[&str],
     address: u64,
-    multiline: bool,
 ) -> Option<(Vec<String>, usize)> {
     let mut result = Vec::new();
-    let mut single_line_statements = Vec::new();
     let mut current_addr = address;
     let mut size = 0;
 
     for line in input {
         let trimmed = line.trim();
         if trimmed.is_empty() {
-            if multiline {
-                result.push(String::new());
-            }
             continue;
         }
 
@@ -33,11 +28,7 @@ pub fn disassemble_text(
                         format!("{} {}", mnemonic, op_str)
                     };
 
-                    if multiline {
-                        result.push(statement);
-                    } else {
-                        single_line_statements.push(statement);
-                    }
+                    result.push(statement);
                 }
 
                 current_addr += bytes.len() as u64;
@@ -47,14 +38,6 @@ pub fn disassemble_text(
             }
         } else {
             return None;
-        }
-    }
-
-    if !multiline {
-        if single_line_statements.is_empty() {
-            return Some((vec![String::new()], size));
-        } else {
-            return Some((vec![single_line_statements.join("; ")], size));
         }
     }
 

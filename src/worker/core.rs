@@ -125,13 +125,11 @@ pub fn run(
         // And assembles it
         if let Some(cmd) = latest_cmd {
             let now = Instant::now();
-            let msg: Vec<&str> = cmd.input.iter().map(|s| s.as_str()).collect();
+            let mut msg: Vec<&str> = cmd.input.iter().map(|s| s.as_str()).collect();
 
             let reply = match input::identify_type(&msg) {
                 InputType::Hex => {
-                    if let Some((output_lines, size)) =
-                        disassemble_text(&cs, &msg, cfg.address, cfg.multiline)
-                    {
+                    if let Some((output_lines, size)) = disassemble_text(&cs, &msg, cfg.address) {
                         let success = !output_lines.iter().all(|line| line.is_empty());
                         WorkerResult::Success {
                             duration: now.elapsed(),
@@ -145,7 +143,9 @@ pub fn run(
                     }
                 }
                 InputType::Assembly => {
-                    if let Some((mapped_bytes, size)) = assemble_text(&ks, &cs, &msg, cfg.address) {
+                    if let Some((mapped_bytes, size)) =
+                        assemble_text(&ks, &cs, &mut msg, cfg.address)
+                    {
                         let output_lines: Vec<String> = if cfg.multiline {
                             mapped_bytes
                                 .into_iter()
