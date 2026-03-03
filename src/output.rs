@@ -44,6 +44,13 @@ impl AsmSyntax {
             Self::Att => "AT&T",
         }
     }
+
+    pub fn next(&self) -> Self {
+        match self {
+            AsmSyntax::Intel => AsmSyntax::Att,
+            AsmSyntax::Att => AsmSyntax::Intel,
+        }
+    }
 }
 
 impl Into<capstone::Syntax> for AsmSyntax {
@@ -107,7 +114,11 @@ pub fn format_bytes(b: &[u8], format: &HexFormat) -> String {
             format!("unsigned char data[{}] = {{ {} }};", b.len(), byte_strings)
         }
         HexFormat::StringLiteral => {
-            let byte_strings = join_hex_bytes(b, "0x", ", ");
+            let byte_strings = b
+                .iter()
+                .map(|byte| format!("\\x{:02X}", byte))
+                .collect::<Vec<_>>()
+                .join("");
             format!("\"{}\"", byte_strings)
         }
     }
