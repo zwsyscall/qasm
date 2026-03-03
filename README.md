@@ -60,4 +60,4 @@ The current binds, which are also visible at runtime are as follows
 ![Example 3](screenshots/example-3.png)
 
 ## Known issues
-Currently, writing `[nonsense]` assembly inputs will freeze the program. This is a keystone bug and I have been unable to create a good workaround for this. My current method is to have a parser function that attempts to validate for input that might crash keystone, but it is not robust enough. If you face crashes, please open a pull issue with the input and I can add it as an edge-case. 
+Changing the syntax and/or multiline mode only changes it for the output. To re-format your input, you need to change to the output panel and change the syntax. This was originally intended but this behaviour will be changed when I figure out an idiomatic way to add this functionality.
