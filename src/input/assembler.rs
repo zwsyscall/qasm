@@ -5,20 +5,21 @@ use std::ffi::CString;
 pub fn assemble_text(
     ks: &Keystone,
     cs: &Capstone,
-    input: &[&str],
+    input: &mut [&str],
     address: u64,
 ) -> Option<(Vec<Vec<u8>>, usize)> {
-    let mut expected_counts = Vec::new();
-    for &line in input {
-        let trimmed = line.trim();
-
-        if trimmed.is_empty() || trimmed.ends_with(':') {
-            expected_counts.push(0);
+    let mut produces_code = Vec::new();
+    // Strip comments, empty lines etc
+    for line in input.iter_mut() {
+        let end = line.find(';').unwrap_or(line.len());
+        *line = line[..end].trim();
+        if line.is_empty() || line.ends_with(':') {
+            produces_code.push(false);
         } else {
-            let count = trimmed.split(';').filter(|s| !s.trim().is_empty()).count();
-            expected_counts.push(count);
+            produces_code.push(true);
         }
     }
+
     let full_text = CString::new(input.join("\n")).ok()?;
     let asm_result = ks.asm(full_text.as_c_str(), address).ok()?;
 
@@ -28,15 +29,19 @@ pub fn assemble_text(
     let decoded_instructions = cs.disasm_all(flat_bytes, address).ok()?;
     let mut decoded_iter = decoded_instructions.iter();
     let mut mapped_lines = Vec::new();
-    for expected_count in expected_counts {
-        let mut line_bytes = Vec::new();
-        for _ in 0..expected_count {
-            if let Some(insn) = decoded_iter.next() {
-                line_bytes.extend_from_slice(insn.bytes());
-            }
-        }
 
-        mapped_lines.push(line_bytes);
+    for &has_code in &produces_code {
+        if has_code {
+            if let Some(insn) = decoded_iter.next() {
+                mapped_lines.push(insn.bytes().to_vec());
+            } else {
+                // Fallback: Keystone generated fewer instructions than expected
+                mapped_lines.push(Vec::new());
+            }
+        } else {
+            // Comments, empty lines, and standalone labels get an empty vector
+            mapped_lines.push(Vec::new());
+        }
     }
 
     Some((mapped_lines, size))
