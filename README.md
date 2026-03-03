@@ -55,7 +55,7 @@ The current binds, which are also visible at runtime are as follows
 - `Up/Down`: ±0x100 to the address
 
 ## Screenshots
-![Example 1](screenshots/example-1.png)
+![Example 1](screenshots/image.png)
 ![Example 2](screenshots/example-2.png)
 ![Example 3](screenshots/example-3.png)
 
