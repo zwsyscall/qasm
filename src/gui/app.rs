@@ -205,7 +205,11 @@ pub fn run(args: Cli, init_syntax: output::AsmSyntax) -> io::Result<()> {
                 } => {
                     state.toggle_focus();
                     state.last_was_asm = !state.last_was_asm;
-                    needs_update = true;
+                    mod_input(
+                        &mut state.textareas[state.selected],
+                        &state.config,
+                        state.last_was_asm,
+                    );
 
                     mod_output(
                         &mut state.textareas[state.unselected()],
